@@ -174,6 +174,14 @@ class MatchResult:
     up_score: float = 0.0
     matched: bool = False
     manual_override: bool = False
+    needs_review: bool = False
+    has_selection: bool = False
+    candidates: list = None  # type: ignore
+
+    def __post_init__(self):
+        if self.candidates is None:
+            self.candidates = []
+        self.has_selection = self.matched
 
 
 @dataclass
