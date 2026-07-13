@@ -207,6 +207,34 @@ class BilibiliMatcher:
         
         return False
 
+    def _has_artist_evidence(self, song: KugouSong, video: BilibiliVideo) -> bool:
+        if not song.artist.strip():
+            return True
+        artist_clean = re.sub(r"[()（）\[\]【】\s]", "", song.artist.lower().strip())
+        if not artist_clean:
+            return True
+        title_clean = re.sub(r"[()（）\[\]【】\s]", "", video.title.lower())
+        uploader_clean = re.sub(r"[()（）\[\]【】\s]", "", video.uploader.lower())
+
+        if artist_clean in title_clean:
+            return True
+        if artist_clean in uploader_clean:
+            return True
+
+        artist_words = set(re.findall(r"\w+", artist_clean))
+        title_words = set(re.findall(r"\w+", title_clean))
+        uploader_words = set(re.findall(r"\w+", uploader_clean))
+
+        if artist_words:
+            title_overlap = len(artist_words & title_words)
+            uploader_overlap = len(artist_words & uploader_words)
+            if title_overlap >= len(artist_words) * 0.5:
+                return True
+            if uploader_overlap >= len(artist_words) * 0.5:
+                return True
+
+        return False
+
     def match(self, song: KugouSong, videos: list[BilibiliVideo], top_k: int = 1) -> list[MatchResult]:
         results: list[MatchResult] = []
         self._block_count = 0
@@ -230,6 +258,11 @@ class BilibiliMatcher:
                 + up  # UP主加权直接加到总分
             )
 
+            matched = kw >= 20.0
+            needs_review = False
+            if matched and not self._has_artist_evidence(song, video):
+                needs_review = True
+
             results.append(
                 MatchResult(
                     song=song,
@@ -240,7 +273,8 @@ class BilibiliMatcher:
                     official_score=of,
                     popularity_score=po,
                     up_score=up,
-                    matched=kw >= 20.0,
+                    matched=matched,
+                    needs_review=needs_review,
                 )
             )
 
