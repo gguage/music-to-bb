@@ -10,6 +10,7 @@ from loguru import logger
 from rich.console import Console
 
 from models import KugouSong
+from netx import Client, RetryConfig
 
 
 class KugouScraper:
@@ -18,8 +19,10 @@ class KugouScraper:
 
     def __init__(self, page=None):
         self.page = page
-        self._http = httpx.Client(
-            timeout=15.0,
+        retry = RetryConfig(max_attempts=3, base_backoff=0.25, max_backoff=3.0)
+        self._netx = Client(
+            timeout=20.0,
+            retry=retry,
             headers={
                 "User-Agent": (
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -28,8 +31,8 @@ class KugouScraper:
                 ),
                 "Referer": "https://m.kugou.com/",
             },
-            follow_redirects=True,
         )
+        self._http = self._netx._http
 
     def scrape_playlist(self, url: str) -> list[KugouSong]:
         logger.debug(f"Scraping Kugou playlist: {url}")
@@ -44,8 +47,9 @@ class KugouScraper:
     def _try_http_scrape(self, url: str) -> list[KugouSong]:
         songs: list[KugouSong] = []
         try:
-            resp = self._http.get(url)
-            resp.raise_for_status()
+            resp = self._netx.get(url)
+            if resp is None:
+                return songs
             final_url = str(resp.url)
             text = resp.text
 
@@ -370,10 +374,11 @@ class KugouScraper:
             try:
                 url = api_url.replace("{playlist_id}", playlist_id)
                 if params:
-                    resp = self._http.get(url, params=params)
+                    resp = self._netx.get(url, params=params)
                 else:
-                    resp = self._http.get(url)
-                resp.raise_for_status()
+                    resp = self._netx.get(url)
+                if resp is None:
+                    continue
                 data = resp.json()
 
                 items = extract_items(data)

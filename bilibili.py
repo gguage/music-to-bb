@@ -14,6 +14,7 @@ from loguru import logger
 from PIL import Image
 
 from models import BilibiliVideo, BilibiliFavorite
+from netx import Client, TokenBucketLimiter, RetryConfig
 
 COOKIE_DIR = Path(__file__).parent / ".cookies"
 COOKIE_DIR.mkdir(exist_ok=True)
@@ -54,9 +55,13 @@ class BilibiliClient:
     QR_GENERATE_API = "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"
     QR_POLL_API = "https://passport.bilibili.com/x/passport-login/web/qrcode/poll"
 
-    def __init__(self):
-        self._http = httpx.Client(
-            timeout=15.0,
+    def __init__(self, rate_per_second: float = 0, config_dir: str = ""):
+        retry = RetryConfig(max_attempts=3, base_backoff=0.25, max_backoff=3.0)
+        limiter = TokenBucketLimiter(rate_per_second) if rate_per_second > 0 else None
+        self._netx = Client(
+            timeout=20.0,
+            limiter=limiter,
+            retry=retry,
             headers={
                 "User-Agent": (
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -67,8 +72,9 @@ class BilibiliClient:
                 "Origin": "https://www.bilibili.com",
                 "Accept": "application/json, text/plain, */*",
             },
-            follow_redirects=True,
         )
+        self._http = self._netx._http
+        self._config_dir = config_dir
         self._wbi_img_key: Optional[str] = None
         self._wbi_sub_key: Optional[str] = None
         self._wbi_keys_ts: float = 0
@@ -90,6 +96,11 @@ class BilibiliClient:
         except Exception as e:
             logger.warning(f"Fingerprint init failed: {e}")
 
+    def _cookie_path(self, name: str = "bilibili") -> Path:
+        if self._config_dir:
+            return Path(self._config_dir) / "cookies" / f"{name}.json"
+        return COOKIE_DIR / f"{name}.json"
+
     def save_cookies(self, name: str = "bilibili"):
         try:
             cookies = []
@@ -100,14 +111,15 @@ class BilibiliClient:
                     "domain": c.domain,
                     "path": c.path,
                 })
-            path = COOKIE_DIR / f"{name}.json"
+            path = self._cookie_path(name)
+            path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps(cookies, ensure_ascii=False, indent=2), encoding="utf-8")
             logger.info(f"Cookies saved to {path} ({len(cookies)} items)")
         except Exception as e:
             logger.warning(f"Save cookies failed: {e}")
 
     def load_cookies(self, name: str = "bilibili") -> bool:
-        path = COOKIE_DIR / f"{name}.json"
+        path = self._cookie_path(name)
         if not path.exists():
             logger.warning(f"No saved cookies for {name}")
             return False
@@ -128,7 +140,7 @@ class BilibiliClient:
             return False
 
     def has_cookies(self, name: str = "bilibili") -> bool:
-        return (COOKIE_DIR / f"{name}.json").exists()
+        return self._cookie_path(name).exists()
 
     def qr_login(self, on_qr_image: Optional[Callable[[Image.Image], None]] = None) -> bool:
         logger.info("Starting QR code login...")
@@ -265,25 +277,9 @@ class BilibiliClient:
         try:
             self._ensure_fingerprint()
 
-            # 搜索时不使用cookie，避免被用户tag影响结果
-            # 创建临时不带cookie的客户端
-            search_client = httpx.Client(
-                headers={
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                    "Referer": "https://www.bilibili.com",
-                },
-                timeout=30.0,
-            )
+            resp = self._netx.get(self.SEARCH_API, params=params)
             
-            # 只保留必要的指纹cookie
-            for c in self._http.cookies.jar:
-                if c.name in ["buvid3", "buvid4"]:
-                    search_client.cookies.set(c.name, c.value, domain=c.domain)
-
-            resp = search_client.get(self.SEARCH_API, params=params)
-            search_client.close()
-            
-            data = resp.json() if resp.status_code == 200 else None
+            data = resp.json() if resp and resp.status_code == 200 else None
             if not data or data.get("code") != 0:
                 logger.warning(f"Search failed for '{keyword}': code={data.get('code') if data else 'None'} msg={data.get('message','') if data else ''}")
                 return videos
@@ -530,4 +526,4 @@ class BilibiliClient:
             return ""
 
     def close(self):
-        self._http.close()
+        self._netx.close()
