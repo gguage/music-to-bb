@@ -1,3 +1,26 @@
 # 视频关键词加权列表
 # 匹配以下视频关键词的视频将获得加权
 # 一行一个，#开头的行会被忽略
+官方
+official
+Official
+OFFICIAL
+MV
+mv
+无损
+flac
+FLAC
+Hi-Res
+hi-res
+HIRES
+4K
+杜比
+Dolby
+全景声
+录音室
+Studio
+Live
+live
+LIVE
+现场
+演唱会
