@@ -114,4 +114,9 @@ music-to-bb/
 ├── w.txt            # 加权关键词
 ├── w-up.txt         # UP主加权列表
 └── requirements.txt
+
+## 许可证
+
+GNU Affero General Public License v3.0 (AGPL-3.0)
+
 ```
